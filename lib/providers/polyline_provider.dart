@@ -108,11 +108,13 @@ class PolylineProvider extends ChangeNotifier {
   bool get hasUnknownFuture => _hasUnknownFuture;
 
   Set<VehicleType> get selectedTypes => Set.unmodifiable(_selectedTypes);
-  Set<VehicleType> get userDeselectedTypes => Set.unmodifiable(_userDeselectedTypes);
+  Set<VehicleType> get userDeselectedTypes =>
+      Set.unmodifiable(_userDeselectedTypes);
 
   List<int> get availableYears => _trips?.years ?? const [];
   List<VehicleType> get availableTypes => _trips?.vehicleTypes ?? const [];
-  List<VehicleType> get availableTypesWithoutPoi => _trips?.vehicleTypesWithoutPoi ?? const [];
+  List<VehicleType> get availableTypesWithoutPoi =>
+      _trips?.vehicleTypesWithoutPoi ?? const [];
 
   DateTime get _nowUtc => DateTime.now().toUtc();
 
@@ -384,7 +386,8 @@ class PolylineProvider extends ChangeNotifier {
     // First load
     if (_polylines.isEmpty) {
       final ignoreCache =
-          (_lastTripsPolylineRevision != -1 && newRevision != _lastTripsPolylineRevision);
+          (_lastTripsPolylineRevision != -1 &&
+          newRevision != _lastTripsPolylineRevision);
 
       unawaited(reload(ignoreCache: ignoreCache));
       _lastTripsPolylineRevision = newRevision;
@@ -417,7 +420,9 @@ class PolylineProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final palette = MapColorPaletteHelper.getPalette(settings.mapColorPalette);
+      final palette = MapColorPaletteHelper.getPalette(
+        settings.mapColorPalette,
+      );
 
       // -----------------------------------------------------------------------
       // 1) Try file cache first
@@ -508,14 +513,21 @@ class PolylineProvider extends ChangeNotifier {
     if (repo == null) return;
 
     try {
-      final palette = MapColorPaletteHelper.getPalette(settings.mapColorPalette);
+      final palette = MapColorPaletteHelper.getPalette(
+        settings.mapColorPalette,
+      );
       final loadedIds = _polylines.map((e) => e.tripId).toSet();
 
       // Fetch + decode only the trips missing from the in-memory list.
-      final decoded = await PolylineLoader.loadMissing(repo, loadedIds, palette);
+      final decoded = await PolylineLoader.loadMissing(
+        repo,
+        loadedIds,
+        palette,
+      );
 
       if (decoded.isEmpty) return;
-      if (_loadToken != loadToken) return; // Check after the heavy compute step.
+      if (_loadToken != loadToken)
+        return; // Check after the heavy compute step.
 
       debugPrint(
         '⚠️ Polyline integrity: ${decoded.length} trip(s) have a path in the DB '
@@ -533,7 +545,9 @@ class PolylineProvider extends ChangeNotifier {
         }
       }
 
-      debugPrint('✅ Polyline integrity: recovered ${styled.length} missing polyline(s)');
+      debugPrint(
+        '✅ Polyline integrity: recovered ${styled.length} missing polyline(s)',
+      );
 
       _reconcileFiltersWithTrips();
       _rebuildRenderedPolylines(notify: true);
@@ -588,7 +602,10 @@ class PolylineProvider extends ChangeNotifier {
     unawaited(saveToCache());
   }
 
-  void upsertPolylinesFromTrips(List<Trips> trips, {List<List<LatLng>>? paths}) {
+  void upsertPolylinesFromTrips(
+    List<Trips> trips, {
+    List<List<LatLng>>? paths,
+  }) {
     final settings = _settings;
     if (settings == null) return;
 
@@ -605,7 +622,9 @@ class PolylineProvider extends ChangeNotifier {
       final polyline = PolylineStyling.createPolyline(path, trip, palette);
       final entry = PolylineStyling.createPolylineEntry(polyline, trip);
 
-      final index = _polylines.indexWhere((e) => e.tripId == int.parse(trip.uid));
+      final index = _polylines.indexWhere(
+        (e) => e.tripId == int.parse(trip.uid),
+      );
       if (index >= 0) {
         _polylines[index] = entry;
       } else {
@@ -643,10 +662,12 @@ class PolylineProvider extends ChangeNotifier {
 
     // Refresh whether unknown past/future trips exist so the filter UI can
     // show/hide their dedicated buttons in step with the loaded data.
-    _hasUnknownPast =
-        _polylines.any((e) => e.startDate?.year == unknownPast.year);
-    _hasUnknownFuture =
-        _polylines.any((e) => e.startDate?.year == unknownFuture.year);
+    _hasUnknownPast = _polylines.any(
+      (e) => e.startDate?.year == unknownPast.year,
+    );
+    _hasUnknownFuture = _polylines.any(
+      (e) => e.startDate?.year == unknownFuture.year,
+    );
 
     final filtered = PolylineStyling.filterBySelection(
       _polylines,
@@ -759,7 +780,9 @@ class PolylineProvider extends ChangeNotifier {
     // Consume both signals up front (the getters clear themselves on read).
     final deleted = trips.deletedTripIds;
     final partialUpdate = trips.modificatedTrips;
-    debugPrint('Trips changed (upserts=${partialUpdate?.length ?? -1}, deletes=${deleted?.length ?? 0})');
+    debugPrint(
+      'Trips changed (upserts=${partialUpdate?.length ?? -1}, deletes=${deleted?.length ?? 0})',
+    );
 
     // Drop polylines for trips removed server-side. Done first so any rebuild
     // below already reflects the removals.

@@ -19,7 +19,9 @@ class PolylineLoader {
     TripsRepository repo,
     Map<VehicleType, Color> palette,
   ) async {
-    final pathData = await repo.getPathExtendedData(PathDisplayOrder.creationDate);
+    final pathData = await repo.getPathExtendedData(
+      PathDisplayOrder.creationDate,
+    );
     return _decode(pathData, palette);
   }
 
@@ -76,9 +78,9 @@ class PolylineLoader {
       return m;
     }).toList();
 
-    return compute(
-      PolylineTools.decodePolylinesBatchIsolateFriendly,
-      {'entries': entries, 'colors': colors},
-    );
+    return compute(PolylineTools.decodePolylinesBatchIsolateFriendly, {
+      'entries': entries,
+      'colors': colors,
+    });
   }
 }
