@@ -9,7 +9,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:lottie/lottie.dart' as lt;
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 import 'package:trainlog_app/app/theme/app_colors.dart';
@@ -22,7 +21,8 @@ import 'package:trainlog_app/features/map/map_marker.dart';
 import 'package:trainlog_app/features/trips_add/open_add_trip_wizard.dart';
 import 'package:trainlog_app/features/trips_add/widgets/full_screen_search_overlay.dart';
 import 'package:trainlog_app/navigation/nav_models.dart';
-import 'package:trainlog_app/platform/adaptive_bottom_navbar.dart' show kNavBarClearance;
+import 'package:trainlog_app/platform/adaptive_bottom_navbar.dart'
+    show kNavBarClearance;
 import 'package:trainlog_app/platform/liquid_glass.dart';
 import 'package:trainlog_app/platform/adaptive_trip_card.dart';
 import 'package:trainlog_app/platform/adaptive_widget.dart';
@@ -52,7 +52,10 @@ class MapPage extends StatefulWidget {
 }
 
 class _MapPageState extends State<MapPage>
-    with WidgetsBindingObserver, AutomaticKeepAliveClientMixin, SingleTickerProviderStateMixin {
+    with
+        WidgetsBindingObserver,
+        AutomaticKeepAliveClientMixin,
+        SingleTickerProviderStateMixin {
   // --- Map state
   final MapController _mapController = MapController();
   final GeoPermissionService _geo = const GeoPermissionService();
@@ -180,15 +183,15 @@ class _MapPageState extends State<MapPage>
       return;
     }
 
-    _posSub = Geolocator.getPositionStream(
-      locationSettings: platformLocationSettings().copyWith(distanceFilter: 10),
-    ).listen(
-      (pos) {
-        if (!mounted) return;
-        _onUserPosition(LatLng(pos.latitude, pos.longitude), settings);
-      },
-      onError: (e) => debugPrint('Location stream error: $e'),
-    );
+    _posSub =
+        Geolocator.getPositionStream(
+          locationSettings: platformLocationSettings().copyWith(
+            distanceFilter: 10,
+          ),
+        ).listen((pos) {
+          if (!mounted) return;
+          _onUserPosition(LatLng(pos.latitude, pos.longitude), settings);
+        }, onError: (e) => debugPrint('Location stream error: $e'));
   }
 
   void _onUserPosition(LatLng p, SettingsProvider settings) {
@@ -235,141 +238,175 @@ class _MapPageState extends State<MapPage>
     super.build(context);
     final appLocalizations = AppLocalizations.of(context)!;
     final settings = context.watch<SettingsProvider>();
-    final poly = context.watch<PolylineProvider>();   
 
-    if (poly.isLoading) {
-      // While loading, don’t show FAB
+    // The map is always shown and interactive; the trips/polyline pipeline
+    // (CSV import off the main isolate, DB read, decode) runs in the
+    // background and the paths fade in as soon as they are ready. Only the
+    // "New trip" FAB is withheld until the first paths are available.
+    //
+    // Use a narrow `select` for the loading gate rather than watching the whole
+    // provider: the provider notifies on every polyline data change, and
+    // rebuilding the heavy FlutterMap on each of those stutters it.
+    final isFirstLoad = context.select<PolylineProvider, bool>(
+      (p) => p.isLoading && p.polylines.isEmpty,
+    );
+    if (isFirstLoad) {
+      // While loading, don't show FAB.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         widget.onPrimaryActionsReady(const []);
       });
-
-      return SafeArea(
-        // The Apple map runs under the status bar and the floating tab bar.
-        top: AppPlatform.isApple,
-        bottom: AppPlatform.isApple,
-        left: false,
-        right: false,
-        child: Center(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const SizedBox(height: 24),
-              Text(appLocalizations.tripPathLoading,
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 16),
-              Expanded(child: lt.Lottie.asset('assets/animations/loading.json')),     
-            ],
-          ),
-        ),
-        ),
-      );
+    } else {
+      // After loading, show FAB if filter modal is closed
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final action = _buildPrimaryAction(context);
+        widget.onPrimaryActionsReady(action == null ? const [] : [action]);
+      });
     }
 
-    // After loading, show FAB if filter modal is closed
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final action = _buildPrimaryAction(context);
-      widget.onPrimaryActionsReady(action == null ? const [] : [action]);
-    });
-
-    return Stack(
-      children: [
-        FlutterMap(
-          mapController: _mapController,
-          options: MapOptions(
-            initialCenter: _center,
-            initialZoom: _zoom,
-            // Both bounds must stay finite. A fast pinch can make flutter_map
-            // feed a non-positive scale to log() (its guard checks
-            // details.scale, but the value used is details.scale plus an
-            // internal gesture-race corrector), producing an infinite or NaN
-            // zoom. MapCamera then asserts on it. Finite limits let clampZoom
-            // absorb that frame instead: -infinity lands on minZoom, NaN on
-            // maxZoom. 0 is a fully zoomed-out world; 22 is past anything
-            // usable, so over-zoom above OSM's native zoom 19 still works as
-            // before.
-            minZoom: 0,
-            maxZoom: 22,
-            keepAlive: true,
-            interactionOptions: const InteractionOptions(
-              rotationThreshold: 20.0,
-              enableMultiFingerGestureRace: true,
-            ),
-            onPositionChanged: (pos, hasGesture) {
-              _center = pos.center;
-              _zoom = pos.zoom;
-              _rotationNotifier.value = pos.rotation;
-            },
-          ),
-          children: [
-            TileLayer(
-              urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-              userAgentPackageName: 'me.trainlog.app',
-              errorTileCallback: (tile, error, stackTrace) {},
-            ),
-            RenderedPolylineLayer(
-              onTripTap: (tripId) async {
-                final repo = context.read<TripsProvider>().repository;
-                if (repo == null) return;
-
-                final tappedTrip = await repo.getTripById(tripId);
-                if (tappedTrip == null || !context.mounted) return;
-
-                await showAdaptiveTripBottomSheet(context, trip: tappedTrip);
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOut,
+      builder: (context, opacity, child) =>
+          Opacity(opacity: opacity, child: child),
+      child: Stack(
+        children: [
+          FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: _center,
+              initialZoom: _zoom,
+              // Both bounds must stay finite. A fast pinch can make flutter_map
+              // feed a non-positive scale to log() (its guard checks
+              // details.scale, but the value used is details.scale plus an
+              // internal gesture-race corrector), producing an infinite or NaN
+              // zoom. MapCamera then asserts on it. Finite limits let clampZoom
+              // absorb that frame instead: -infinity lands on minZoom, NaN on
+              // maxZoom. 0 is a fully zoomed-out world; 22 is past anything
+              // usable, so over-zoom above OSM's native zoom 19 still works as
+              // before.
+              minZoom: 0,
+              maxZoom: 22,
+              keepAlive: true,
+              interactionOptions: const InteractionOptions(
+                rotationThreshold: 20.0,
+                enableMultiFingerGestureRace: true,
+                // Lower pinch thresholds make zoom/pan engage sooner, so the map
+                // feels more responsive to two-finger gestures.
+                pinchZoomThreshold: 0.25,
+                pinchMoveThreshold: 20.0,
+                // Lower damping gives a fling more momentum (bouncier); raise it
+                // to stop the map sooner after a one-finger fling.
+                flingAnimationDampingRatio: 4.0,
+              ),
+              onPositionChanged: (pos, hasGesture) {
+                _center = pos.center;
+                _zoom = pos.zoom;
+                _rotationNotifier.value = pos.rotation;
               },
             ),
-            if (settings.mapDisplayTripDirection)
-              const TripDirectionChevronLayer(),
-            if (_userPosition != null && settings.mapDisplayUserLocationMarker)
-              MarkerLayer(
-                markers: [
-                  Marker(
-                    width: 30,
-                    height: 30,
-                    point: _userPosition!,
-                    child: const MapMarker(),
-                  ),
-                ],
+            children: [
+              TileLayer(
+                urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                userAgentPackageName: 'me.trainlog.app',
+                errorTileCallback: (tile, error, stackTrace) {},
               ),
-            if (_searchedPlace != null)
-              MarkerLayer(
-                markers: [
-                  Marker(
-                    width: 40,
-                    height: 40,
-                    point: _searchedPlace!.point,
-                    alignment: Alignment.topCenter,
-                    child: GestureDetector(
-                      onTap: () => setState(() => _searchedPlace = null),
-                      child: Icon(
-                        Icons.location_on,
-                        size: 40,
-                        color: Theme.of(context).colorScheme.error,
+              RenderedPolylineLayer(
+                onTripTap: (tripId) async {
+                  final repo = context.read<TripsProvider>().repository;
+                  if (repo == null) return;
+
+                  final tappedTrip = await repo.getTripById(tripId);
+                  if (tappedTrip == null || !context.mounted) return;
+
+                  await showAdaptiveTripBottomSheet(context, trip: tappedTrip);
+                },
+              ),
+              if (settings.mapDisplayTripDirection)
+                const TripDirectionChevronLayer(),
+              if (_userPosition != null &&
+                  settings.mapDisplayUserLocationMarker)
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      width: 30,
+                      height: 30,
+                      point: _userPosition!,
+                      child: const MapMarker(),
+                    ),
+                  ],
+                ),
+              if (_searchedPlace != null)
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      width: 40,
+                      height: 40,
+                      point: _searchedPlace!.point,
+                      alignment: Alignment.topCenter,
+                      child: GestureDetector(
+                        onTap: () => setState(() => _searchedPlace = null),
+                        child: Icon(
+                          Icons.location_on,
+                          size: 40,
+                          color: Theme.of(context).colorScheme.error,
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-          ],
-        ),
-
-        // The map runs under the status bar, so keep the credit below it.
-        const SafeArea(
-          child: OsmMark(
-            isCompact: false,
-            alignment: Alignment.topLeft,
-            //orientation: MarkOrientation.vertical,
-            //margin: EdgeInsets.only(left: 6, bottom: 80, right: 6, top: 6),
+                  ],
+                ),
+            ],
           ),
-        ),
 
-        if (_followUser) _lockedOnPositionPill(appLocalizations),
-        _topRightButtons(appLocalizations),
-        _mapButtonHelper(),
-      ],
+          // The map runs under the status bar, so keep the credit below it.
+          const SafeArea(
+            child: OsmMark(
+              isCompact: false,
+              alignment: Alignment.topLeft,
+              //orientation: MarkOrientation.vertical,
+              //margin: EdgeInsets.only(left: 6, bottom: 80, right: 6, top: 6),
+            ),
+          ),
+
+          // Loading pill at the top, between the OSM attribution (left) and
+          // the search bar (right): a non-blocking cue while paths load, no
+          // spinner.
+          if (isFirstLoad)
+            Positioned(
+              top:
+                  MediaQuery.of(context).padding.top +
+                  (AppPlatform.isApple ? 8 : 12),
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      appLocalizations.tripPathLoading,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+          if (_followUser) _lockedOnPositionPill(appLocalizations),
+          _topRightButtons(appLocalizations),
+          _mapButtonHelper(),
+        ],
+      ),
     );
   }
 
@@ -377,11 +414,14 @@ class _MapPageState extends State<MapPage>
     final appLocalizations = AppLocalizations.of(context)!;
     // iOS: the "scope" crosshair, close to Android's my_location icon.
     final Icon recenterUserIcon = Icon(
-        AppPlatform.isApple ? CupertinoIcons.scope : Icons.my_location);
-    final Icon followUserIcon = Icon(_followUser ? Symbols.frame_person_off : Symbols.frame_person);
+      AppPlatform.isApple ? CupertinoIcons.scope : Icons.my_location,
+    );
+    final Icon followUserIcon = Icon(
+      _followUser ? Symbols.frame_person_off : Symbols.frame_person,
+    );
     final navColors = Theme.of(context).extension<AppNavBarColors>()!;
 
-    Future<void> recenterFct () async {
+    Future<void> recenterFct() async {
       // No fix yet: this is an explicit user action, so it's fine to ask the
       // OS for permission now (one of the only places on the map that does so).
       final p = await _ensureUserPosition();
@@ -399,7 +439,8 @@ class _MapPageState extends State<MapPage>
         _zoom = z;
       });
     }
-    Future<void> followUserFct () async {
+
+    Future<void> followUserFct() async {
       // Turning follow off needs no location access.
       if (_followUser) {
         setState(() => _followUser = false);
@@ -416,6 +457,7 @@ class _MapPageState extends State<MapPage>
         _followUser = true;
       });
     }
+
     // Apple: "New trip" lives in the tab bar, so these controls only clear
     // the tab bar. Material: they sit above the 56 px tall FAB.
     final double buttonsBottom = AppPlatform.isApple
@@ -463,9 +505,9 @@ class _MapPageState extends State<MapPage>
               children: [
                 // Recenter user
                 AdaptiveFilledIconButton(
-                    onPressed: () => recenterFct(),
-                    colorScheme: FilledButtonColorScheme.floating,
-                    child: recenterUserIcon,
+                  onPressed: () => recenterFct(),
+                  colorScheme: FilledButtonColorScheme.floating,
+                  child: recenterUserIcon,
                 ),
                 // Follow user
                 DecoratedBox(
@@ -478,8 +520,7 @@ class _MapPageState extends State<MapPage>
                       ),
                     ),
                   ),
-                  child: 
-                  AdaptiveFilledIconButton(
+                  child: AdaptiveFilledIconButton(
                     onPressed: () => followUserFct(),
                     colorScheme: FilledButtonColorScheme.floating,
                     child: followUserIcon,
@@ -604,7 +645,9 @@ class _MapPageState extends State<MapPage>
 
     final navColors = Theme.of(context).extension<AppNavBarColors>()!;
     final (_, fg) = FilledButtonColorScheme.resolveColors(
-        context, FilledButtonColorScheme.floating);
+      context,
+      FilledButtonColorScheme.floating,
+    );
 
     return Tooltip(
       message: tooltip,
@@ -637,7 +680,8 @@ class _MapPageState extends State<MapPage>
     return OverlayEntry(
       builder: (context) {
         final theme = Theme.of(context);
-        final showNoResult = !_isSearching &&
+        final showNoResult =
+            !_isSearching &&
             _searchResults.isEmpty &&
             _searchCtl.text.trim().isNotEmpty;
 
@@ -775,11 +819,10 @@ class _MapPageState extends State<MapPage>
     _searchOverlay?.markNeedsBuild();
 
     final results = await context.read<TrainlogProvider>().searchLocation(
-          query,
-          visibleBounds: _mapController.camera.visibleBounds,
-          languageCode:
-              context.read<SettingsProvider>().locale.languageCode,
-        );
+      query,
+      visibleBounds: _mapController.camera.visibleBounds,
+      languageCode: context.read<SettingsProvider>().locale.languageCode,
+    );
 
     if (!mounted || _searchOverlay == null || requestId != _searchRequestId) {
       return;
@@ -864,9 +907,8 @@ class _MapPageState extends State<MapPage>
       isScrollControlled: true,
       useRootNavigator: true,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) => MapFilterWidget(
-        onClose: () => Navigator.of(sheetContext).pop(),
-      ),
+      builder: (sheetContext) =>
+          MapFilterWidget(onClose: () => Navigator.of(sheetContext).pop()),
     );
   }
 }

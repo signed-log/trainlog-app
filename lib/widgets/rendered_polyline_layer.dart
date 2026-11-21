@@ -9,10 +9,7 @@ import 'package:trainlog_app/providers/polyline_provider.dart';
 class RenderedPolylineLayer extends StatefulWidget {
   final Future<void> Function(int tripId) onTripTap;
 
-  const RenderedPolylineLayer({
-    super.key,
-    required this.onTripTap,
-  });
+  const RenderedPolylineLayer({super.key, required this.onTripTap});
 
   @override
   State<RenderedPolylineLayer> createState() => _RenderedPolylineLayerState();
@@ -21,6 +18,7 @@ class RenderedPolylineLayer extends StatefulWidget {
 class _RenderedPolylineLayerState extends State<RenderedPolylineLayer> {
   final LayerHitNotifier<int> _hitNotifier = ValueNotifier(null);
   Timer? _singleTapTimer;
+  bool _everRendered = false;
 
   @override
   void dispose() {
@@ -31,13 +29,21 @@ class _RenderedPolylineLayerState extends State<RenderedPolylineLayer> {
 
   @override
   Widget build(BuildContext context) {
-    return Selector<PolylineProvider, ({List<Polyline<int>> polylines, int revision})>(
+    return Selector<
+      PolylineProvider,
+      ({List<Polyline<int>> polylines, int revision})
+    >(
       selector: (_, provider) => (
         polylines: provider.renderedPolylines,
         revision: provider.renderRevision,
       ),
       shouldRebuild: (prev, next) => prev.revision != next.revision,
       builder: (context, data, child) {
+        // Fade the paths in on their first appearance instead of popping in,
+        // so the map feels continuous as loading completes.
+        final hasPolylines = data.polylines.isNotEmpty;
+        _everRendered = _everRendered || hasPolylines;
+
         return GestureDetector(
           onTapUp: (_) {
             final result = _hitNotifier.value;
@@ -46,20 +52,28 @@ class _RenderedPolylineLayerState extends State<RenderedPolylineLayer> {
             if (hit == null) return;
 
             _singleTapTimer?.cancel();
-            _singleTapTimer = Timer(const Duration(milliseconds: 150), () async {
-              await widget.onTripTap(hit);
-            });
+            _singleTapTimer = Timer(
+              const Duration(milliseconds: 150),
+              () async {
+                await widget.onTripTap(hit);
+              },
+            );
           },
           onDoubleTap: () => _singleTapTimer?.cancel(),
-          child: PolylineLayer<int>(
-            hitNotifier: _hitNotifier,
-            polylines: data.polylines,
-            // Culling fragments partially-off-screen polylines and re-anchors
-            // their dashed pattern to the moving fragment edge on every pan,
-            // which makes the dashes flicker. Draw the full (per-zoom
-            // simplified) line so the dashed overlay stays anchored to the
-            // trip's actual start and does not shift while scrolling.
-            cullingMargin: null,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeOut,
+            opacity: _everRendered ? 1 : 0,
+            child: PolylineLayer<int>(
+              hitNotifier: _hitNotifier,
+              polylines: data.polylines,
+              // Culling fragments partially-off-screen polylines and re-anchors
+              // their dashed pattern to the moving fragment edge on every pan,
+              // which makes the dashes flicker. Draw the full (per-zoom
+              // simplified) line so the dashed overlay stays anchored to the
+              // trip's actual start and does not shift while scrolling.
+              cullingMargin: null,
+            ),
           ),
         );
       },
