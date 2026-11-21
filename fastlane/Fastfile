@@ -1,0 +1,67 @@
+# This file contains the fastlane.tools configuration for Trainlog iOS.
+#
+# The build + upload for TestFlight is driven from GitHub Actions via the
+# `release_ios` lane (see .github/workflows/release-ios.yml). It can also be
+# run locally with: bundle exec fastlane release_ios
+
+fastlane_version "2.219.0"
+
+default_platform(:ios)
+
+platform :ios do
+  desc "Build the Release .ipa and upload it to TestFlight"
+  lane :release_ios do
+    setup_ci()
+
+    # 0. Use the App Store Connect API key for all App Store Connect interactions
+    #    (match, pilot). Reads APP_STORE_CONNECT_API_KEY_* env vars set in CI so
+    #    fastlane does not fall back to username/password auth.
+    app_store_connect_api_key(
+      key_id: ENV["APP_STORE_CONNECT_API_KEY_KEY_ID"],
+      issuer_id: ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"],
+      key_content: ENV["APP_STORE_CONNECT_API_KEY_KEY"],
+    )
+
+    # 1. Install the Distribution certificate + App Store provisioning profile.
+    #    readonly on CI — never creates new certs. The encrypted store and its
+    #    passphrase come from the MATCH_GIT_URL / MATCH_PASSWORD env vars.
+    match(
+      type: "appstore",
+      readonly: is_ci,
+    )
+
+    # 2. Install CocoaPods dependencies for the Runner workspace before building.
+    #    `use_bundle_exec` keeps pod install consistent with the Gemfile.
+    cocoapods(
+      use_bundle_exec: true,
+      podfile: "ios/Podfile",
+    )
+
+    # 3. Build the signed Release .ipa and export it for App Store distribution.
+    #    Runs the full Flutter framework build + archive here (no separate
+    #    pre-warm step). The Runner Release config is Manual signing with the
+    #    appstore profile (see project.pbxproj).
+    gym(
+      scheme: "Runner",
+      workspace: "ios/Runner.xcworkspace",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "build/ios/ipa",
+      output_name: "Trainlog",
+      export_team_id: CredentialsManager::AppfileConfig.try_fetch_value(:team_id),
+    )
+
+    # 4. Upload to TestFlight. The changelog comes from the manual trigger's
+    #    "notes" input (passed in as the CI_RELEASE_NOTES environment variable).
+    pilot(
+      ipa: lane_context[SharedValues::IPA_OUTPUT_PATH],
+      skip_waiting_for_build_processing: false,
+      distribute_external: false,
+      notify_external_testers: false,
+      changelog: ENV["CI_RELEASE_NOTES"],
+    )
+
+    # 4. Report what shipped.
+    UI.success("Uploaded Trainlog to TestFlight 🚀")
+  end
+end

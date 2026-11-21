@@ -1,0 +1,11 @@
+[tools]
+node = "latest"
+"npm:skills" = "latest"
+flutter = "3.47.7-stable"
+# Ruby managed by mise so the CocoaPods gem (requires >= 3.3) installs cleanly.
+ruby = "3.4.12"
+cocoapods = "1.17.0"
+xcodegen = "2.48.0"
+java = "latest"
+gradle = "latest"
+jactionlint = "latest"

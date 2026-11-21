@@ -1,0 +1,113 @@
+name: Release iOS (TestFlight)
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "Release notes shown in TestFlight"
+        required: false
+        default: "Test build from CI"
+
+jobs:
+  release-ios:
+    name: Build & upload to TestFlight
+    runs-on: xcode-27
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    concurrency:
+      group: release-ios
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Flutter
+        uses: flutter-actions/setup-flutter@0e3ac53a5126c46be01612423cf26b5d59018adc # v5.0
+        with:
+          # Pin to the project's Flutter version (see mise.toml).
+          # Note: setup-flutter resolves a release version (e.g. 3.47.7), not an
+          # exact git revision, so this matches the stable release channel.
+          channel: stable
+          version: "3.47.7"
+          cache-sdk: true
+
+      - name: Set up Ruby + fastlane
+        uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
+        with:
+          ruby-version: "3.4.12"
+          bundler-cache: true
+          working-directory: fastlane
+
+      - name: Print toolchain versions
+        run: |
+          flutter --version
+          xcodebuild -version
+          echo "Expected revision abaf9c523780a608bd46686fd5e53740a07077f8 (3.47.7)"
+
+      - name: Fetch Flutter dependencies
+        run: flutter pub get
+
+      # ---- Firebase config ----
+      # lib/firebase_options.dart is gitignored but imported by main.dart, so the
+      # build cannot compile without it. Provide it here (fail hard if missing) via
+      # the FIREBASE_OPTIONS_DART secret (base64 of the file) or the
+      # GOOGLE_SERVICE_INFO secret (base64 of ios/Runner/GoogleService-Info.plist).
+      - name: Inject lib/firebase_options.dart
+        shell: bash
+        env:
+          FIREBASE_OPTIONS_DART: ${{ secrets.FIREBASE_OPTIONS_DART }}
+        run: |
+          if [ -n "${FIREBASE_OPTIONS_DART:-}" ]; then
+            echo "$FIREBASE_OPTIONS_DART" | base64 --decode > lib/firebase_options.dart
+          fi
+
+      - name: Verify Firebase config is present
+        continue-on-error: true
+        run: |
+          if [ ! -f lib/firebase_options.dart ]; then
+            echo "::warning::lib/firebase_options.dart is missing. The app imports this file in main.dart; if Firebase is enabled the build will not compile without it."
+            echo "::warning::Provide it via the FIREBASE_OPTIONS_DART secret (base64 of lib/firebase_options.dart), or generate it with: dart run flutterfire configure"
+          fi
+
+      # Optional: inject the Firebase plist when the secret is set. Only needed
+      # when Firebase is initialized at runtime (Firebase.initializeApp + the
+      # GoogleService-Info.plist reference in the Runner target). The plist is
+      # gitignored; without it the build still compiles as long as
+      # firebase_options.dart is present above.
+      - name: Inject GoogleService-Info.plist (when secret is present)
+        shell: bash
+        env:
+          GOOGLE_SERVICE_INFO: ${{ secrets.GOOGLE_SERVICE_INFO }}
+        run: |
+          if [ -n "${GOOGLE_SERVICE_INFO:-}" ]; then
+            echo "$GOOGLE_SERVICE_INFO" | base64 --decode > ios/Runner/GoogleService-Info.plist
+          fi
+
+      # ---- Build signed .ipa and upload to TestFlight ----
+      # The release_ios lane runs match, cocoapods, and gym internally, so no
+      # separate match/pod/pre-warm steps are needed here.
+      - name: Build & upload to TestFlight
+        working-directory: fastlane
+        run: bundle exec fastlane release_ios
+        env:
+          MATCH_GIT_URL: "https://x-access-token:${{ secrets.GIT_REPO_MATCH_TOKEN }}@github.com/signed-log/trainlog-app-certs.git"
+          MATCH_PASSWORD: ${{ secrets.MATCH_GIT_PASSWORD }}
+          FASTLANE_TEAM_ID: ${{ secrets.DEVELOPMENT_TEAM_ID }}
+          # App Store Connect API key (for uploads via the App Store Connect API)
+          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
+          # Optional release note passed to TestFlight via the pilot changelog
+          CI_RELEASE_NOTES: ${{ github.event.inputs.notes }}
+
+      # ---- Upload a copy of the built .ipa for inspection ----
+      - name: Upload .ipa artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Trainlog-ios-ipa
+          path: fastlane/build/ios/ipa/Trainlog.ipa
+          if-no-files-found: warn

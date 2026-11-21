@@ -1,0 +1,17 @@
+# Signing certificates and provisioning profiles are managed with fastlane match.
+# The encrypted store lives in the private repo set via the MATCH_GIT_URL env var
+# (GitHub secret) — it is never committed to this repository.
+storage_mode "git"
+
+# The repo holding the encrypted certs/profiles. Overridden on CI by env.
+git_url ENV["MATCH_GIT_URL"] if ENV["MATCH_GIT_URL"]
+
+# Sign for App Store / TestFlight distribution (plus the build-only environment profiles).
+type "appstore"
+
+# If the master certificates/profile are missing, use a cleanroom to generate them.
+# Keep the default behaviour: on CI we only read, we never create new certs.
+readonly ENV["CI"] == "true"
+
+# Platform is iOS by default; set explicitly for clarity.
+platform "ios"

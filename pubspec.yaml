@@ -1,7 +1,7 @@
 name: trainlog_app
 description: "Your online travel diary"
-publish_to: 'none'
-version: 0.5.1+26
+publish_to: "none"
+version: 0.5.1+27
 
 environment:
   sdk: ^3.8.0
@@ -90,7 +90,10 @@ flutter:
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
+  # Generic image used for Android + Windows launcher icons.
   image_path: "assets/icon/trainlog_icon.png"
+  # iOS requires an opaque (no-alpha) icon, so use a separate flattened copy.
+  image_path_ios: "assets/icon/trainlog_icon_ios.png"
   adaptive_icon_background: "assets/icon/trainlog_icon_background.png"
   adaptive_icon_foreground: "assets/icon/trainlog_icon_foreground.png"
   min_sdk_android: 21
