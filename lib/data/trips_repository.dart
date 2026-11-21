@@ -10,6 +10,7 @@ import 'package:trainlog_app/providers/settings_provider.dart';
 import 'package:diacritic/diacritic.dart';
 import 'dart:convert';
 import 'package:country_picker/country_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:trainlog_app/utils/date_utils.dart';
 import 'package:trainlog_app/data/models/trips_filter.dart';
 
@@ -57,22 +58,27 @@ class TripsRepository {
 
   TripsRepository(this._db);
 
-  static Future<TripsRepository> loadFromCsv(String csvPathOrContent, {bool replace = false, bool path = true}) async {
+  static Future<TripsRepository> loadFromCsv(
+    String csvPathOrContent, {
+    bool replace = false,
+    bool path = true,
+  }) async {
     debugPrint("Trip load from CSV");
     String content;
-    if(path){
+    if (path) {
       final csvPath = csvPathOrContent;
       if (!File(csvPath).existsSync()) {
         throw FileSystemException('CSV file not found', csvPath);
       }
 
       content = await File(csvPath).readAsString();
-    }
-    else {
+    } else {
       content = csvPathOrContent;
     }
 
-    final trips = await parseCsv(content);
+    // Parse the CSV off the main isolate: with thousands of rows the parsing
+    // loop would otherwise block the UI thread (frozen map, stuck spinner).
+    final trips = await compute(parseCsv, content);
     final db = await DatabaseManager.database;
     final repo = TripsRepository(db);
 
@@ -90,7 +96,10 @@ class TripsRepository {
     return TripsRepository(db);
   }
 
-  static Future<TripsRepository> loadFromTripsList(List<Trips> trips, {bool clearTableFirst = false}) async {
+  static Future<TripsRepository> loadFromTripsList(
+    List<Trips> trips, {
+    bool clearTableFirst = false,
+  }) async {
     debugPrint("Load from trip list");
     final db = await DatabaseManager.database;
     final repo = TripsRepository(db);
@@ -120,7 +129,11 @@ class TripsRepository {
     }
   }
 
-  Future<List<Trips>> getAllTrips({int? limit, int? offset, String? orderBy}) async {
+  Future<List<Trips>> getAllTrips({
+    int? limit,
+    int? offset,
+    String? orderBy,
+  }) async {
     final maps = await _db.query(
       TripsTable.tableName,
       limit: limit,
@@ -137,7 +150,10 @@ class TripsRepository {
     String? orderBy,
     TripsFilterResult? filter,
   }) async {
-    final whereInfo  = _buildWhereClause(showFutureTrips: showFutureTrips, filter: filter);
+    final whereInfo = _buildWhereClause(
+      showFutureTrips: showFutureTrips,
+      filter: filter,
+    );
 
     final maps = await _db.query(
       TripsTable.tableName,
@@ -152,7 +168,9 @@ class TripsRepository {
   }
 
   Future<int> count() async {
-    final result = await _db.rawQuery('SELECT COUNT(*) FROM ${TripsTable.tableName}');
+    final result = await _db.rawQuery(
+      'SELECT COUNT(*) FROM ${TripsTable.tableName}',
+    );
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
@@ -164,8 +182,14 @@ class TripsRepository {
     return (Sqflite.firstIntValue(result) ?? 0) > 0;
   }
 
-  Future<int> countFilteredTrips({required bool showFutureTrips, TripsFilterResult? filter,}) async {
-    final whereInfo = _buildWhereClause(showFutureTrips: showFutureTrips, filter: filter);
+  Future<int> countFilteredTrips({
+    required bool showFutureTrips,
+    TripsFilterResult? filter,
+  }) async {
+    final whereInfo = _buildWhereClause(
+      showFutureTrips: showFutureTrips,
+      filter: filter,
+    );
 
     final result = await _db.rawQuery(
       'SELECT COUNT(*) FROM ${TripsTable.tableName} WHERE ${whereInfo['where']}',
@@ -187,7 +211,8 @@ class TripsRepository {
     // overrides the page-level past/future scoping (the "When" section is the
     // single source of truth for time).
     final range = filter?.dateRange();
-    final hasDateFilter = range != null && (range.start != null || range.end != null);
+    final hasDateFilter =
+        range != null && (range.start != null || range.end != null);
 
     if (hasDateFilter) {
       if (range.start != null) {
@@ -207,13 +232,15 @@ class TripsRepository {
     // Keyword (text search over stations, line, material and operator)
     if (filter?.keyword.trim().isNotEmpty ?? false) {
       final keyword = removeDiacritics(filter!.keyword.trim().toLowerCase());
-      clauses.add('('
-          'LOWER(origin_station) LIKE ? OR '
-          'LOWER(destination_station) LIKE ? OR '
-          'LOWER(material_type) LIKE ? OR '
-          'LOWER(line_name) LIKE ? OR '
-          'LOWER(operator) LIKE ?'
-          ')');
+      clauses.add(
+        '('
+        'LOWER(origin_station) LIKE ? OR '
+        'LOWER(destination_station) LIKE ? OR '
+        'LOWER(material_type) LIKE ? OR '
+        'LOWER(line_name) LIKE ? OR '
+        'LOWER(operator) LIKE ?'
+        ')',
+      );
       for (int i = 0; i < 5; i++) {
         args.add('%$keyword%');
       }
@@ -254,10 +281,7 @@ class TripsRepository {
       args.addAll(types);
     }
 
-    return {
-      'where': clauses.join(' AND '),
-      'args': args,
-    };
+    return {'where': clauses.join(' AND '), 'args': args};
   }
 
   Future<List<String>> getPaths() async {
@@ -282,7 +306,9 @@ class TripsRepository {
 
   /// Returns path-related data only for the trips identified by [ids].
   /// Used to recover polylines that were missing from a previous load.
-  Future<List<Map<String, dynamic>>> getPathExtendedDataForIds(List<String> ids) async {
+  Future<List<Map<String, dynamic>>> getPathExtendedDataForIds(
+    List<String> ids,
+  ) async {
     if (ids.isEmpty) return [];
 
     final placeholders = List.filled(ids.length, '?').join(',');
@@ -306,10 +332,7 @@ class TripsRepository {
 
     return maps.map((e) {
       final typeEnum = VehicleType.fromString(e['type']?.toString());
-      return {
-        ...e,
-        'type': typeEnum,
-      };
+      return {...e, 'type': typeEnum};
     }).toList();
   }
 
@@ -326,19 +349,16 @@ class TripsRepository {
         'destination_station',
         'start_datetime',
         'end_datetime',
-        'utc_start_datetime', 
+        'utc_start_datetime',
         'utc_end_datetime',
-        'created',              // Needed for sorting by creationDate
+        'created', // Needed for sorting by creationDate
       ],
       where: 'path IS NOT NULL AND path != \'\'',
     );
 
     final list = maps.map((e) {
       final typeEnum = VehicleType.fromString(e['type']?.toString());
-      return {
-        ...e,
-        'type': typeEnum,
-      };
+      return {...e, 'type': typeEnum};
     }).toList();
 
     switch (order) {
@@ -346,31 +366,32 @@ class TripsRepository {
         break;
 
       case PathDisplayOrder.tripDate:
-        list.sort((a, b) =>
-            DateTime.parse(a['start_datetime'] as String)
-                .compareTo(DateTime.parse(b['start_datetime'] as String)));
+        list.sort(
+          (a, b) => DateTime.parse(
+            a['start_datetime'] as String,
+          ).compareTo(DateTime.parse(b['start_datetime'] as String)),
+        );
         break;
 
       case PathDisplayOrder.tripDatePlaneOver:
-        final nonAir = list
-            .where((e) => e['type'] != VehicleType.plane)
-            .toList()
-          ..sort((a, b) =>
-              DateTime.parse(a['start_datetime'] as String)
-                  .compareTo(DateTime.parse(b['start_datetime'] as String)));
-        final air = list
-            .where((e) => e['type'] == VehicleType.plane)
-            .toList()
-          ..sort((a, b) =>
-              DateTime.parse(a['created'] as String)
-                  .compareTo(DateTime.parse(b['created'] as String)));
+        final nonAir =
+            list.where((e) => e['type'] != VehicleType.plane).toList()..sort(
+              (a, b) => DateTime.parse(
+                a['start_datetime'] as String,
+              ).compareTo(DateTime.parse(b['start_datetime'] as String)),
+            );
+        final air = list.where((e) => e['type'] == VehicleType.plane).toList()
+          ..sort(
+            (a, b) => DateTime.parse(
+              a['created'] as String,
+            ).compareTo(DateTime.parse(b['created'] as String)),
+          );
 
         return [...nonAir, ...air];
     }
 
     return list;
   }
-
 
   Future<List<VehicleType>> fetchListOfTypes() async {
     final maps = await _db.query(
@@ -379,12 +400,13 @@ class TripsRepository {
       where: 'type IS NOT NULL AND type != \'\'',
     );
 
-    final types = maps
-        .map((map) => VehicleType.fromString(map['type'] as String))
-        .where((name) => name != VehicleType.unknown)
-        .toSet()
-        .toList()
-        ..sort((a, b) => a.index.compareTo(b.index));
+    final types =
+        maps
+            .map((map) => VehicleType.fromString(map['type'] as String))
+            .where((name) => name != VehicleType.unknown)
+            .toSet()
+            .toList()
+          ..sort((a, b) => a.index.compareTo(b.index));
 
     return types;
   }
@@ -412,12 +434,14 @@ class TripsRepository {
     final operators = opSet.toList();
 
     // Sort alphabetically, ignoring case and diacritics
-    operators.sort((a, b) =>
-        removeDiacritics(a).toLowerCase().compareTo(removeDiacritics(b).toLowerCase()));
+    operators.sort(
+      (a, b) => removeDiacritics(
+        a,
+      ).toLowerCase().compareTo(removeDiacritics(b).toLowerCase()),
+    );
 
     return operators;
   }
-
 
   Future<List<int>> fetchListOfYears() async {
     final dates = await fetchListOfYearsWithUnknown();
@@ -435,11 +459,12 @@ class TripsRepository {
       where: 'start_datetime IS NOT NULL AND start_datetime != \'\'',
     );
 
-    final dates = maps
-        .map((map) => DateTime.parse(map['start_datetime'] as String).year)
-        .toSet()
-        .toList()
-        ..sort();
+    final dates =
+        maps
+            .map((map) => DateTime.parse(map['start_datetime'] as String).year)
+            .toSet()
+            .toList()
+          ..sort();
 
     return dates;
   }
@@ -475,7 +500,9 @@ class TripsRepository {
     return sorted;
   }
 
-  Future<Map<String, String>> fetchMapOfCountries(CountryLocalizations details) async {
+  Future<Map<String, String>> fetchMapOfCountries(
+    CountryLocalizations details,
+  ) async {
     //final details = CountryLocalizations.of(context);
     final listCodes = await fetchListOfCountryCode();
 
@@ -485,8 +512,9 @@ class TripsRepository {
     };
 
     final sorted = Map.fromEntries(
-      map.entries.toList()
-        ..sort((a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase())),
+      map.entries.toList()..sort(
+        (a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase()),
+      ),
     );
 
     return sorted;
@@ -501,11 +529,14 @@ class TripsRepository {
     bool splitDistance = false,
   }) async {
     // Build WHERE from existing logic
-    final whereInfo = _buildWhereClause(showFutureTrips: showFutureTrips, filter: filter);
+    final whereInfo = _buildWhereClause(
+      showFutureTrips: showFutureTrips,
+      filter: filter,
+    );
     final where = [
       whereInfo['where'] as String,
       'operator IS NOT NULL AND operator != \'\'',
-      'trip_length IS NOT NULL'
+      'trip_length IS NOT NULL',
     ].where((w) => w.isNotEmpty).join(' AND ');
     final args = (whereInfo['args'] as List<dynamic>);
 
@@ -526,7 +557,9 @@ class TripsRepository {
       if (length <= 0) continue;
 
       final ops = rawOp._splitOperatorsDecoded();
-      final share = splitDistance && ops.isNotEmpty ? (length / ops.length) : length;
+      final share = splitDistance && ops.isNotEmpty
+          ? (length / ops.length)
+          : length;
 
       for (final op in ops) {
         totals.update(op, (v) => v + share, ifAbsent: () => share);
@@ -536,19 +569,23 @@ class TripsRepository {
     return _sortedByValueDesc(totals);
   }
 
-  Future<LinkedHashMap<String, ({double past, double future})>> fetchOperatorsByDistancePF({
+  Future<LinkedHashMap<String, ({double past, double future})>>
+  fetchOperatorsByDistancePF({
     TripsFilterResult? filter,
     bool splitDistance = false,
   }) async {
     // Build WHERE twice: once for past, once for future
-    final pastWhere  = _buildWhereClause(showFutureTrips: false, filter: filter);
-    final futureWhere= _buildWhereClause(showFutureTrips: true,  filter: filter);
+    final pastWhere = _buildWhereClause(showFutureTrips: false, filter: filter);
+    final futureWhere = _buildWhereClause(
+      showFutureTrips: true,
+      filter: filter,
+    );
 
     // Add operator/trip_length constraints
     String _augmentWhere(Map<String, dynamic> info) => [
       info['where'] as String,
       'operator IS NOT NULL AND operator != \'\'',
-      'trip_length IS NOT NULL'
+      'trip_length IS NOT NULL',
     ].where((w) => w.isNotEmpty).join(' AND ');
 
     final pastRows = await _db.query(
@@ -568,7 +605,10 @@ class TripsRepository {
     // Accumulate
     final Map<String, ({double past, double future})> totals = {};
 
-    void addRows(Iterable<Map<String, Object?>> rows, {required bool isFuture}) {
+    void addRows(
+      Iterable<Map<String, Object?>> rows, {
+      required bool isFuture,
+    }) {
       for (final row in rows) {
         final rawOp = row['operator'] as String?;
         if (rawOp == null || rawOp.trim().isEmpty) continue;
@@ -584,19 +624,18 @@ class TripsRepository {
         for (final op in ops) {
           final current = totals[op] ?? (past: 0.0, future: 0.0);
           totals[op] = isFuture
-            ? (past: current.past, future: current.future + share)
-            : (past: current.past + share, future: current.future);
+              ? (past: current.past, future: current.future + share)
+              : (past: current.past + share, future: current.future);
         }
       }
     }
 
-    addRows(pastRows,   isFuture: false);
+    addRows(pastRows, isFuture: false);
     addRows(futureRows, isFuture: true);
 
     // Sort by (past + future) desc and return LinkedHashMap
     return _sortedBySumDesc(totals, (v) => v.past + v.future);
   }
-
 
   /// Number of trips each operator is involved in.
   /// A trip with multiple operators increments *each* operator by 1.
@@ -604,7 +643,10 @@ class TripsRepository {
     required bool showFutureTrips,
     TripsFilterResult? filter,
   }) async {
-    final whereInfo = _buildWhereClause(showFutureTrips: showFutureTrips, filter: filter);
+    final whereInfo = _buildWhereClause(
+      showFutureTrips: showFutureTrips,
+      filter: filter,
+    );
     final where = [
       whereInfo['where'] as String,
       'operator IS NOT NULL AND operator != \'\'',
@@ -632,11 +674,13 @@ class TripsRepository {
     return _sortedByValueDesc(counts);
   }
 
-  Future<LinkedHashMap<String, ({int past, int future})>> fetchOperatorsByTripPF({
-    TripsFilterResult? filter,
-  }) async {
-    final pastWhere   = _buildWhereClause(showFutureTrips: false, filter: filter);
-    final futureWhere = _buildWhereClause(showFutureTrips: true,  filter: filter);
+  Future<LinkedHashMap<String, ({int past, int future})>>
+  fetchOperatorsByTripPF({TripsFilterResult? filter}) async {
+    final pastWhere = _buildWhereClause(showFutureTrips: false, filter: filter);
+    final futureWhere = _buildWhereClause(
+      showFutureTrips: true,
+      filter: filter,
+    );
 
     String _augmentWhere(Map<String, dynamic> info) => [
       info['where'] as String,
@@ -659,7 +703,10 @@ class TripsRepository {
 
     final Map<String, ({int past, int future})> counts = {};
 
-    void addRows(Iterable<Map<String, Object?>> rows, {required bool isFuture}) {
+    void addRows(
+      Iterable<Map<String, Object?>> rows, {
+      required bool isFuture,
+    }) {
       for (final row in rows) {
         final rawOp = row['operator'] as String?;
         if (rawOp == null || rawOp.trim().isEmpty) continue;
@@ -668,29 +715,34 @@ class TripsRepository {
         for (final op in rawOp._splitOperatorsDecoded()) {
           final current = counts[op] ?? (past: 0, future: 0);
           counts[op] = isFuture
-            ? (past: current.past, future: current.future + 1)
-            : (past: current.past + 1, future: current.future);
+              ? (past: current.past, future: current.future + 1)
+              : (past: current.past + 1, future: current.future);
         }
       }
     }
 
-    addRows(pastRows,   isFuture: false);
+    addRows(pastRows, isFuture: false);
     addRows(futureRows, isFuture: true);
 
     return _sortedBySumDesc(counts, (v) => v.past + v.future);
   }
 
-  Future<LinkedHashMap<String, ({double past, double future})>> fetchCountriesByDistancePF({
+  Future<LinkedHashMap<String, ({double past, double future})>>
+  fetchCountriesByDistancePF({
     TripsFilterResult? filter,
-    bool splitDistance = false, // set true if you prefer not to double-count multi-country trips
+    bool splitDistance =
+        false, // set true if you prefer not to double-count multi-country trips
   }) async {
-    final pastWhere   = _buildWhereClause(showFutureTrips: false, filter: filter);
-    final futureWhere = _buildWhereClause(showFutureTrips: true,  filter: filter);
+    final pastWhere = _buildWhereClause(showFutureTrips: false, filter: filter);
+    final futureWhere = _buildWhereClause(
+      showFutureTrips: true,
+      filter: filter,
+    );
 
     String _augmentWhere(Map<String, dynamic> info) => [
       info['where'] as String,
       'countries IS NOT NULL AND countries != \'\'',
-      'trip_length IS NOT NULL'
+      'trip_length IS NOT NULL',
     ].where((w) => w.isNotEmpty).join(' AND ');
 
     final pastRows = await _db.query(
@@ -733,7 +785,9 @@ class TripsRepository {
         final length = (row['trip_length'] as num?)?.toDouble() ?? 0.0;
         if (length <= 0) continue;
 
-        final share = splitDistance && codes.isNotEmpty ? (length / codes.length) : length;
+        final share = splitDistance && codes.isNotEmpty
+            ? (length / codes.length)
+            : length;
 
         for (final code in codes) {
           final curr = totals[code] ?? (past: 0.0, future: 0.0);
@@ -744,17 +798,19 @@ class TripsRepository {
       }
     }
 
-    _add(pastRows,   isFuture: false);
+    _add(pastRows, isFuture: false);
     _add(futureRows, isFuture: true);
 
     return _sortedBySumDesc(totals, (v) => v.past + v.future);
   }
 
-  Future<LinkedHashMap<String, ({int past, int future})>> fetchCountriesByTripPF({
-    TripsFilterResult? filter,
-  }) async {
-    final pastWhere   = _buildWhereClause(showFutureTrips: false, filter: filter);
-    final futureWhere = _buildWhereClause(showFutureTrips: true,  filter: filter);
+  Future<LinkedHashMap<String, ({int past, int future})>>
+  fetchCountriesByTripPF({TripsFilterResult? filter}) async {
+    final pastWhere = _buildWhereClause(showFutureTrips: false, filter: filter);
+    final futureWhere = _buildWhereClause(
+      showFutureTrips: true,
+      filter: filter,
+    );
 
     String _augmentWhere(Map<String, dynamic> info) => [
       info['where'] as String,
@@ -799,13 +855,11 @@ class TripsRepository {
       }
     }
 
-    _add(pastRows,   isFuture: false);
+    _add(pastRows, isFuture: false);
     _add(futureRows, isFuture: true);
 
     return _sortedBySumDesc(counts, (v) => v.past + v.future);
   }
-
-
 
   Future<void> insertTrip(Trips trip) async {
     if (!_schemaChecked) {
@@ -884,8 +938,10 @@ class TripsRepository {
       if (column == 'uid') continue;
       if (keys.contains(column)) cols.add(column);
     }
-    if (keys.contains('utc_filtered_start_datetime')) cols.add('utc_start_datetime');
-    if (keys.contains('utc_filtered_end_datetime')) cols.add('utc_end_datetime');
+    if (keys.contains('utc_filtered_start_datetime'))
+      cols.add('utc_start_datetime');
+    if (keys.contains('utc_filtered_end_datetime'))
+      cols.add('utc_end_datetime');
     if (hasPath) cols.add('path');
     return cols;
   }
@@ -914,7 +970,11 @@ class TripsRepository {
 
     final batch = _db.batch();
     for (final id in toDelete) {
-      batch.delete(TripsTable.tableName, where: 'uid = ?', whereArgs: [id.toString()]);
+      batch.delete(
+        TripsTable.tableName,
+        where: 'uid = ?',
+        whereArgs: [id.toString()],
+      );
     }
     await batch.commit(noResult: true);
 
@@ -926,16 +986,15 @@ class TripsRepository {
   }
 
   Future<void> deleteTripById(String uid) async {
-    await _db.delete(
-      TripsTable.tableName,
-      where: 'uid = ?',
-      whereArgs: [uid],
-    );
+    await _db.delete(TripsTable.tableName, where: 'uid = ?', whereArgs: [uid]);
   }
 
   static Future<List<Trips>> parseCsv(String csvContent) async {
     debugPrint('🧪 Inside isolate: parsing CSV...');
-    final rows = const CsvToListConverter(eol: '\n', shouldParseNumbers: false).convert(csvContent);
+    final rows = const CsvToListConverter(
+      eol: '\n',
+      shouldParseNumbers: false,
+    ).convert(csvContent);
     debugPrint('📊 Parsed ${rows.length} rows');
 
     final header = rows.first.map((e) => e.toString().trim()).toList();
@@ -978,7 +1037,9 @@ class TripsRepository {
     if (TripsTable.addedColumns.isNotEmpty) return true;
 
     final db = await DatabaseManager.database;
-    final columns = await db.rawQuery('PRAGMA table_info(${TripsTable.tableName})');
+    final columns = await db.rawQuery(
+      'PRAGMA table_info(${TripsTable.tableName})',
+    );
     final existingColumns = columns.map((col) => col['name'] as String).toSet();
     return TripsTable.columns.keys.any((key) => !existingColumns.contains(key));
   }
@@ -1061,7 +1122,9 @@ class TripsTable {
       if (!existingColumns.contains(entry.key)) {
         // ALTER TABLE cannot add a PRIMARY KEY; strip the constraint.
         final colType = entry.value.replaceAll('PRIMARY KEY', '').trim();
-        await db.execute('ALTER TABLE $tableName ADD COLUMN ${entry.key} $colType');
+        await db.execute(
+          'ALTER TABLE $tableName ADD COLUMN ${entry.key} $colType',
+        );
         addedColumns.add(entry.key);
       }
     }
