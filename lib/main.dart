@@ -15,10 +15,10 @@ import 'package:trainlog_app/utils/app_user_agent.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:trainlog_app/utils/cached_data_utils.dart';
 
-import 'package:firebase_core/firebase_core.dart';
+// import 'package:firebase_core/firebase_core.dart';
 import 'package:trainlog_app/utils/platform_utils.dart';
 import 'package:trainlog_app/utils/timezone_utils.dart';
-import 'firebase_options.dart';
+// import 'firebase_options.dart';
 
 import 'package:country_codes_plus/country_codes_plus.dart';
 
@@ -28,7 +28,7 @@ bool _isOsmTileNetworkError(Object error) {
       (msg.contains('SocketException') || msg.contains('ClientException'));
 }
 
-Future<void> _initFirebase() async {
+/* Future<void> _initFirebase() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
@@ -48,7 +48,7 @@ Future<void> _initFirebase() async {
       return true;
     };
   }
-}
+} */
 
 // Everything awaited before runApp keeps the native splash screen on, so only
 // local work belongs here, run in parallel where possible. Network calls (the
@@ -64,7 +64,7 @@ Future<void> main() async {
   // instance URL and install flags below. Cache paths are needed by the
   // local database.
   await Future.wait([
-    _initFirebase(),
+    // _initFirebase(),
     AppCacheFilePath.init(),
     AppUserAgent.init(),
     // iOS/macOS tab bar glass: preload the shaders before the first frame.
