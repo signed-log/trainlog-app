@@ -67,12 +67,8 @@ class _RenderedPolylineLayerState extends State<RenderedPolylineLayer> {
             child: PolylineLayer<int>(
               hitNotifier: _hitNotifier,
               polylines: data.polylines,
-              // Culling fragments partially-off-screen polylines and re-anchors
-              // their dashed pattern to the moving fragment edge on every pan,
-              // which makes the dashes flicker. Draw the full (per-zoom
-              // simplified) line so the dashed overlay stays anchored to the
-              // trip's actual start and does not shift while scrolling.
-              cullingMargin: null,
+              simplificationTolerance: 0.25,
+              cullingMargin: 10,
             ),
           ),
         );
